@@ -16,8 +16,8 @@
 
 
 #if BRISKET
-#define GRILL_OFF_MEAT_TEMP   175
-#define MEAT_FINISHING_TEMP   185
+#define GRILL_OFF_MEAT_TEMP   195
+#define MEAT_FINISHING_TEMP   195
 #define INITIAL_GRILL_TEMP    233      // Temp for the first hours of the smoke :)
 #define SECONDARY_GRILL_TEMP  220      // Finishing temp of the smoke.
 #define HOURS_TRIGGER          48      // Set to a large number (i.e. 48) if you don't want to trigger on time.
@@ -25,10 +25,10 @@
 #endif
 
 #if BUTT
-#define GRILL_OFF_MEAT_TEMP   185 
-#define MEAT_FINISHING_TEMP   190
-#define INITIAL_GRILL_TEMP    300     // Temp for the first hours of the smoke :)
-#define SECONDARY_GRILL_TEMP  300      // Finishing temp of the smoke.
+#define GRILL_OFF_MEAT_TEMP   195 
+#define MEAT_FINISHING_TEMP   195
+#define INITIAL_GRILL_TEMP    230     // Temp for the first hours of the smoke :)
+#define SECONDARY_GRILL_TEMP  275      // Finishing temp of the smoke.
 #define HOURS_TRIGGER           5      // Set to a large number (i.e. 24) if you don't want a secondary temp.
 #define FOOD_TEMP_TRIGGER     160      //  Food temp to trigger SECONDARY_GRILL_TEMP state
 #endif
@@ -175,19 +175,13 @@ void setFanDutyCycle(int diff)
 {
   float dutyCycle = diff * 17.0 + FAN_LOW;    // Fan starts working at 65.  *19 gives us 65-255
   
-  if (diff <= 0){        // At or above temp
-    dutyCycle = FAN_LOW;
-    analogWrite(FAN_CONTROL_PIN, FAN_LOW);
-  }
-  else {
-    if (diff > 10){        // > 10 degrees low go wide open
+  if (diff <= 0)     // At or above temp
+      dutyCycle = FAN_OFF;
+  else
+    if (diff > 2)       // > 10 degrees low go wide open
       dutyCycle=FAN_HIGH;
-      analogWrite(FAN_CONTROL_PIN, dutyCycle);
-    }
-    else{
-      analogWrite(FAN_CONTROL_PIN, dutyCycle);
-    }
-  }
+  
+  analogWrite(FAN_CONTROL_PIN, dutyCycle);
   
   Console.print("dutyCycle = ");
   Console.print(dutyCycle);
