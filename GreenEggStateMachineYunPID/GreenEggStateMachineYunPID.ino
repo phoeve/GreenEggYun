@@ -16,21 +16,21 @@
 
 
 #if BRISKET
-#define GRILL_OFF_MEAT_TEMP   195
-#define MEAT_FINISHING_TEMP   195
-#define INITIAL_GRILL_TEMP    233      // Temp for the first hours of the smoke :)
-#define SECONDARY_GRILL_TEMP  220      // Finishing temp of the smoke.
+#define GRILL_OFF_MEAT_TEMP   203
+#define MEAT_FINISHING_TEMP   203
+#define INITIAL_GRILL_TEMP    250      // Temp for the first hours of the smoke :)
+#define SECONDARY_GRILL_TEMP  275      // Finishing temp of the smoke.
 #define HOURS_TRIGGER          48      // Set to a large number (i.e. 48) if you don't want to trigger on time.
-#define FOOD_TEMP_TRIGGER     140      //  Food temp to trigger SECONDARY_GRILL_TEMP state
+#define FOOD_TEMP_TRIGGER     165      //  Food temp to trigger SECONDARY_GRILL_TEMP state
 #endif
 
 #if BUTT
-#define GRILL_OFF_MEAT_TEMP   195 
-#define MEAT_FINISHING_TEMP   195
-#define INITIAL_GRILL_TEMP    230      // Temp for the first hours of the smoke :)
-#define SECONDARY_GRILL_TEMP  230      // Finishing temp of the smoke.
-#define HOURS_TRIGGER           5      // Set to a large number (i.e. 24) if you don't want a secondary temp.
-#define FOOD_TEMP_TRIGGER     160      //  Food temp to trigger SECONDARY_GRILL_TEMP state STALL
+#define GRILL_OFF_MEAT_TEMP   200 
+#define MEAT_FINISHING_TEMP   200
+#define INITIAL_GRILL_TEMP    235      // Temp for the first hours of the smoke :)
+#define SECONDARY_GRILL_TEMP  265      // Finishing temp of the smoke.
+#define HOURS_TRIGGER           6      // Set to a large number (i.e. 24) if you don't want a secondary temp.
+#define FOOD_TEMP_TRIGGER     165      //  Food temp to trigger SECONDARY_GRILL_TEMP state STALL
 #endif
 
 
@@ -62,15 +62,43 @@
 
 
 #include "Bridge.h"
+#include <YunServer.h>
+#include <YunClient.h>
+#include <PID_v1.h>
 
+YunServer server;
+
+
+//Define Variables we'll be connecting to
+
+double TargetGrillTemp=0.0, CurrentGrillTemp=0.0, FanSpeed=0.0;
+//Specify the links and initial tuning parameters
+// Lots of P not much I and a lot of D
+PID myPID(&CurrentGrillTemp, &FanSpeed, &TargetGrillTemp ,25.0,1.0,15.0, DIRECT);
+
+#define FAN_OFF 65.0
+#define FAN_HIGH 255.0
 
 void setup() {   
 
   Bridge.begin();
 
-  Console.begin();
+  //Console.begin();  Auto starts on IDE connect
+
+    //initialize the variables we're linked to
+  CurrentGrillTemp = getTemp(GRILL_PROBE_PIN);
+  TargetGrillTemp = INITIAL_GRILL_TEMP;
+
+  myPID.SetOutputLimits(FAN_OFF, FAN_HIGH);
+
+  //turn the PID on
+  myPID.SetMode(AUTOMATIC);
+
   
   pinMode(FAN_CONTROL_PIN, OUTPUT);    // init fan pin
+
+  server.listenOnLocalhost();
+  server.begin();
 
 }
 
@@ -85,23 +113,15 @@ enum state {
 
 state MyState = GRILL_INIT;
 
-#define FAN_OFF 0
-#define FAN_LOW 65
-#define FAN_HIGH 255
+
 
 
 void loop() 
 {
-  static int desiredGrillTemp=0;
-  
 
-    Console.print("Timer = ");  Console.print((float)millis()/(1000.0*60.0*60.0));  Console.print("\n");
-    Console.print("State = ");  Console.print(MyState);  Console.print("\n");
-    Console.print("desiredGrillTemp = ");  Console.print(desiredGrillTemp);  Console.print("\n");
-    Console.print("GRILL Probe = ");  Console.print(getTemp(GRILL_PROBE_PIN));  Console.print(", ");
-    Console.print("Food Probes 1-3 = ");  Console.print(getTemp(FOOD_PROBE_1_PIN));  Console.print(", ");
-    Console.print(getTemp(FOOD_PROBE_2_PIN));  Console.print(", ");  Console.print(getTemp(FOOD_PROBE_3_PIN));  Console.print("\n");
+  YunClient client = server.accept();
 
+  String line = "";
 
   switch (MyState){
     
@@ -112,7 +132,7 @@ void loop()
       break;
       
     case GRILL_PHASE_1:
-      desiredGrillTemp = INITIAL_GRILL_TEMP;
+      TargetGrillTemp = INITIAL_GRILL_TEMP;
       
                                               // If we reach the first phase time trigger
       if ( ((float)millis() / (60.0*60.0*1000.0)) >= HOURS_TRIGGER){
@@ -127,13 +147,13 @@ void loop()
       break;
       
     case GRILL_PHASE_2:
-      desiredGrillTemp = SECONDARY_GRILL_TEMP;
+      TargetGrillTemp = SECONDARY_GRILL_TEMP;
       break;
       
     case GRILL_OFF:          
                             // SEND TEXT MSG - Light LED indicating "Time to Wrap in Foil !!!"
       setFanDutyCycle(FAN_OFF);
-      desiredGrillTemp = 150;
+      TargetGrillTemp = 150;
       MyState = MEAT_FINISHING;
       return;
       break;
@@ -158,39 +178,54 @@ void loop()
     MyState = GRILL_OFF;                     // SHUT'ER DOWN !!!!!!!  Get the tongs out !
     return;
   }
+
+  CurrentGrillTemp = getTemp(GRILL_PROBE_PIN);
+  myPID.Compute();      // Run PID alg //
+
+  
           // Set the necessary fan duty cycle
-   setFanDutyCycle( (desiredGrillTemp - getTemp(GRILL_PROBE_PIN)) );  // 1 degree below -> run fan @ 10%,   10 degrees below - run fan @ 100%
+  setFanDutyCycle(FanSpeed);  // 1 degree below -> run fan @ 10%,   10 degrees below - run fan @ 100%
    
-   if (desiredGrillTemp - getTemp(GRILL_PROBE_PIN) > 15 ){
+  if (TargetGrillTemp - CurrentGrillTemp > 15 ){
                                                                // TEXT MSG and flash all LED's
-     Console.print("Grill > 15 degrees below temp !! - Add charcoal and reignite if necessary\n"); 
-   }
+    line += "Grill > 15 degrees below temp !! - Add charcoal and reignite if necessary\n"; 
+  }
+
+
+    line += String(CurrentGrillTemp) + "/" + String(TargetGrillTemp);
+    line += " Food " + String(getTemp(FOOD_PROBE_1_PIN)) + "/";
+    line += String(getTemp(FOOD_PROBE_2_PIN)) + "/" + String(getTemp(FOOD_PROBE_3_PIN));
+    line += " Fan " + String(FanSpeed);
+    line += " Timer " + String((float)millis()/(1000.0*60.0*60.0));
+    line += " State " + String(MyState);
+    line += "\n";
+    
+    Console.print(line);
+
+    if (client) {
+      Console.print("Got web connection\n");
+      
+      client.println(line);
+      client.stop();
+    }
+  
 
   return;
 }
 
 
 
-void setFanDutyCycle(int diff)
+void setFanDutyCycle(float speed)
 {
-  float dutyCycle = diff * 17.0 + FAN_LOW;    // Fan starts working at 65.  *19 gives us 65-255
-  
-  if (diff <= 0)     // At or above temp
-      dutyCycle = FAN_OFF;
+  if (speed <= FAN_OFF)                 // fan damper won't open until 65 (FAN_OFF), so just stop the fan.
+    analogWrite(FAN_CONTROL_PIN, 0.0);
   else
-    if (diff > 2)       // > 10 degrees low go wide open
-      dutyCycle=FAN_HIGH;
-  
-  analogWrite(FAN_CONTROL_PIN, dutyCycle);
-  
-  Console.print("dutyCycle = ");
-  Console.print(dutyCycle);
-  Console.print("\n");
+    analogWrite(FAN_CONTROL_PIN, speed);
 }
 
 
 
-#define NUM_SAMPLES 2
+#define NUM_SAMPLES 1
 #define SAMPLE_INTERVAL 250
 float getTemp(int pin){
   float valueSum=0;
