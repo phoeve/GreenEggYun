@@ -8,6 +8,7 @@
 #if TURKEY_BREAST
 #define GRILL_OFF_MEAT_TEMP   160
 #define MEAT_FINISHING_TEMP   160
+#define FINSHED_WARMING_TEMP  150
 #define INITIAL_GRILL_TEMP    325      // Temp for the first hours of the smoke :)
 #define SECONDARY_GRILL_TEMP  325      // Finishing temp of the smoke.
 #define HOURS_TRIGGER          48      // Set to a large number (i.e. 48) if you don't want to trigger on time.
@@ -18,6 +19,7 @@
 #if BRISKET
 #define GRILL_OFF_MEAT_TEMP   203
 #define MEAT_FINISHING_TEMP   203
+#define FINSHED_WARMING_TEMP  150
 #define INITIAL_GRILL_TEMP    250      // Temp for the first hours of the smoke :)
 #define SECONDARY_GRILL_TEMP  275      // Finishing temp of the smoke.
 #define HOURS_TRIGGER          48      // Set to a large number (i.e. 48) if you don't want to trigger on time.
@@ -27,10 +29,12 @@
 #if BUTT
 #define GRILL_OFF_MEAT_TEMP   200 
 #define MEAT_FINISHING_TEMP   200
+#define FINSHED_WARMING_TEMP  150
 #define INITIAL_GRILL_TEMP    235      // Temp for the first hours of the smoke :)
-#define SECONDARY_GRILL_TEMP  265      // Finishing temp of the smoke.
+#define SECONDARY_GRILL_TEMP  235      // Finishing temp of the smoke.
 #define HOURS_TRIGGER           6      // Set to a large number (i.e. 24) if you don't want a secondary temp.
 #define FOOD_TEMP_TRIGGER     165      //  Food temp to trigger SECONDARY_GRILL_TEMP state STALL
+
 #endif
 
 
@@ -38,6 +42,7 @@
 #if PORK_LOIN
 #define GRILL_OFF_MEAT_TEMP   138 
 #define MEAT_FINISHING_TEMP   145
+#define FINSHED_WARMING_TEMP  150
 #define INITIAL_GRILL_TEMP    325      // Temp for the first hours of the smoke :)
 #define SECONDARY_GRILL_TEMP  330      // Finishing temp of the smoke.
 #define HOURS_TRIGGER          24      // Set to a large number (i.e. 24) if you don't want a secondary temp.
@@ -72,9 +77,12 @@ YunServer server;
 //Define Variables we'll be connecting to
 
 double TargetGrillTemp=0.0, CurrentGrillTemp=0.0, FanSpeed=0.0;
-//Specify the links and initial tuning parameters
-// Lots of P not much I and a lot of D
-PID myPID(&CurrentGrillTemp, &FanSpeed, &TargetGrillTemp ,25.0,1.0,15.0, DIRECT);
+
+                  //Specify the links and initial tuning parameters
+                  // P - Adjust fan speed based on difference from setpoint (Proportional)
+                  // I - Adjust fan speed based on cumulative difference from setpoint  over time (Integral)
+                  // D - Adjust fan speed based on rate of change of temp difference from setpoint (Derivative)
+PID myPID(&CurrentGrillTemp, &FanSpeed, &TargetGrillTemp, 10.0, 0.2, 7.0, DIRECT); // Lots of P not much I and a lot of D
 
 #define FAN_OFF 65.0
 #define FAN_HIGH 255.0
@@ -128,22 +136,16 @@ void loop()
     case GRILL_INIT:
       setFanDutyCycle(0);                  // turn fan off
       MyState = GRILL_PHASE_1;
-      return;
       break;
       
     case GRILL_PHASE_1:
       TargetGrillTemp = INITIAL_GRILL_TEMP;
-      
                                               // If we reach the first phase time trigger
-      if ( ((float)millis() / (60.0*60.0*1000.0)) >= HOURS_TRIGGER){
+      if ( ((float)millis() / (60.0*60.0*1000.0)) >= HOURS_TRIGGER)
         MyState = GRILL_PHASE_2;
-        return;
-      }
                                               //  If we reach the first phase meat temp trigger
-      if ( (getTemp(FOOD_PROBE_1_PIN) >= FOOD_TEMP_TRIGGER) && (getTemp(FOOD_PROBE_2_PIN) >= FOOD_TEMP_TRIGGER) ){
+      if ( (getTemp(FOOD_PROBE_1_PIN) >= FOOD_TEMP_TRIGGER) && (getTemp(FOOD_PROBE_2_PIN) >= FOOD_TEMP_TRIGGER) )
         MyState = GRILL_PHASE_2;
-        return;
-      }
       break;
       
     case GRILL_PHASE_2:
@@ -153,36 +155,29 @@ void loop()
     case GRILL_OFF:          
                             // SEND TEXT MSG - Light LED indicating "Time to Wrap in Foil !!!"
       setFanDutyCycle(FAN_OFF);
-      TargetGrillTemp = 150;
+      TargetGrillTemp = FINSHED_WARMING_TEMP;
       MyState = MEAT_FINISHING;
-      return;
       break;
       
     case MEAT_FINISHING:
                             // Light LED !!!!!!
-      if ( (getTemp(FOOD_PROBE_1_PIN) >= MEAT_FINISHING_TEMP) && (getTemp(FOOD_PROBE_2_PIN) >= MEAT_FINISHING_TEMP) ){
+      if ( (getTemp(FOOD_PROBE_1_PIN) >= MEAT_FINISHING_TEMP) && (getTemp(FOOD_PROBE_2_PIN) >= MEAT_FINISHING_TEMP) )
         MyState = FINISHED;
-      }
-      return;
       break;
       
     case FINISHED:
                             // Light LED !!!!!!
-      return;
+      line += "<Finished> ";
       break;  
   }
   
-  
                                           // Check to see if BOTH probes are above GRILL_OFF_MEAT_TEMP
-  if ( (getTemp(FOOD_PROBE_1_PIN) >= GRILL_OFF_MEAT_TEMP) && (getTemp(FOOD_PROBE_2_PIN) >= GRILL_OFF_MEAT_TEMP) ){
+  if ( (getTemp(FOOD_PROBE_1_PIN) >= GRILL_OFF_MEAT_TEMP) && (getTemp(FOOD_PROBE_2_PIN) >= GRILL_OFF_MEAT_TEMP) )
     MyState = GRILL_OFF;                     // SHUT'ER DOWN !!!!!!!  Get the tongs out !
-    return;
-  }
 
   CurrentGrillTemp = getTemp(GRILL_PROBE_PIN);
   myPID.Compute();      // Run PID alg //
 
-  
           // Set the necessary fan duty cycle
   setFanDutyCycle(FanSpeed);  // 1 degree below -> run fan @ 10%,   10 degrees below - run fan @ 100%
    
@@ -192,9 +187,9 @@ void loop()
   }
 
 
-    line += String(CurrentGrillTemp) + "/" + String(TargetGrillTemp);
-    line += " Food " + String(getTemp(FOOD_PROBE_1_PIN)) + "/";
-    line += String(getTemp(FOOD_PROBE_2_PIN)) + "/" + String(getTemp(FOOD_PROBE_3_PIN));
+    line += String(CurrentGrillTemp) + "/ " + String(TargetGrillTemp);
+    line += " Food " + String(getTemp(FOOD_PROBE_1_PIN)) + "/ ";
+    line += String(getTemp(FOOD_PROBE_2_PIN)) + "/ " + String(getTemp(FOOD_PROBE_3_PIN));
     line += " Fan " + String(FanSpeed);
     line += " Timer " + String((float)millis()/(1000.0*60.0*60.0));
     line += " State " + String(MyState);
@@ -209,7 +204,6 @@ void loop()
       client.stop();
     }
   
-
   return;
 }
 
@@ -226,7 +220,7 @@ void setFanDutyCycle(float speed)
 
 
 #define NUM_SAMPLES 1
-#define SAMPLE_INTERVAL 250
+#define SAMPLE_INTERVAL 500      // Slows scrolling of IDE logging window
 float getTemp(int pin){
   float valueSum=0;
   float value;
